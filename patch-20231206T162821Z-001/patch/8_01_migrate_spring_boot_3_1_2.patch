@@ -1,0 +1,1831 @@
+Subject: [PATCH] 8_01_migrate_spring_boot_3_1
+---
+Index: src/main/java/ru/javaops/bootjava/config/WebSecurityConfig.java
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/config/WebSecurityConfig.java b/src/main/java/ru/javaops/bootjava/config/WebSecurityConfig.java
+deleted file mode 100644
+--- a/src/main/java/ru/javaops/bootjava/config/WebSecurityConfig.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ /dev/null	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
+@@ -1,68 +0,0 @@
+-package ru.javaops.bootjava.config;
+-
+-import com.fasterxml.jackson.databind.ObjectMapper;
+-import lombok.AllArgsConstructor;
+-import lombok.extern.slf4j.Slf4j;
+-import org.springframework.beans.factory.annotation.Autowired;
+-import org.springframework.context.annotation.Bean;
+-import org.springframework.context.annotation.Configuration;
+-import org.springframework.http.HttpMethod;
+-import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
+-import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+-import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+-import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter;
+-import org.springframework.security.config.http.SessionCreationPolicy;
+-import org.springframework.security.core.userdetails.UserDetailsService;
+-import org.springframework.security.core.userdetails.UsernameNotFoundException;
+-import ru.javaops.bootjava.model.Role;
+-import ru.javaops.bootjava.model.User;
+-import ru.javaops.bootjava.repository.UserRepository;
+-import ru.javaops.bootjava.util.JsonUtil;
+-import ru.javaops.bootjava.web.AuthUser;
+-
+-import java.util.Optional;
+-
+-import static ru.javaops.bootjava.util.UserUtil.PASSWORD_ENCODER;
+-
+-@Configuration
+-@EnableWebSecurity
+-@Slf4j
+-@AllArgsConstructor
+-public class WebSecurityConfig extends WebSecurityConfigurerAdapter {
+-
+-    private final UserRepository userRepository;
+-
+-    @Autowired
+-    private void setMapper(ObjectMapper objectMapper) {
+-        JsonUtil.setMapper(objectMapper);
+-    }
+-
+-    @Bean
+-    @Override
+-    public UserDetailsService userDetailsServiceBean() throws Exception {
+-        return super.userDetailsServiceBean();
+-    }
+-
+-    @Autowired
+-    public void configureGlobal(AuthenticationManagerBuilder auth) throws Exception {
+-        auth.userDetailsService(
+-                        email -> {
+-                            log.debug("Authenticating '{}'", email);
+-                            Optional<User> optionalUser = userRepository.findByEmailIgnoreCase(email);
+-                            return new AuthUser(optionalUser.orElseThrow(
+-                                    () -> new UsernameNotFoundException("User '" + email + "' was not found")));
+-                        })
+-                .passwordEncoder(PASSWORD_ENCODER);
+-    }
+-
+-    @Override
+-    protected void configure(HttpSecurity http) throws Exception {
+-        http.authorizeRequests()
+-                .antMatchers("/api/admin/**").hasRole(Role.ADMIN.name())
+-                .antMatchers(HttpMethod.POST, "/api/profile").anonymous()
+-                .antMatchers("/api/**").authenticated()
+-                .and().httpBasic()
+-                .and().sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+-                .and().csrf().disable();
+-    }
+-}
+\ No newline at end of file
+Index: src/main/java/ru/javaops/bootjava/web/GlobalExceptionHandler.java
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/web/GlobalExceptionHandler.java b/src/main/java/ru/javaops/bootjava/web/GlobalExceptionHandler.java
+deleted file mode 100644
+--- a/src/main/java/ru/javaops/bootjava/web/GlobalExceptionHandler.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ /dev/null	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
+@@ -1,86 +0,0 @@
+-package ru.javaops.bootjava.web;
+-
+-import lombok.AllArgsConstructor;
+-import lombok.extern.slf4j.Slf4j;
+-import org.springframework.boot.web.error.ErrorAttributeOptions;
+-import org.springframework.boot.web.servlet.error.ErrorAttributes;
+-import org.springframework.http.HttpHeaders;
+-import org.springframework.http.HttpStatus;
+-import org.springframework.http.ResponseEntity;
+-import org.springframework.lang.NonNull;
+-import org.springframework.validation.BindException;
+-import org.springframework.validation.BindingResult;
+-import org.springframework.web.bind.MethodArgumentNotValidException;
+-import org.springframework.web.bind.annotation.ExceptionHandler;
+-import org.springframework.web.bind.annotation.RestControllerAdvice;
+-import org.springframework.web.context.request.WebRequest;
+-import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
+-import ru.javaops.bootjava.error.AppException;
+-import ru.javaops.bootjava.util.validation.ValidationUtil;
+-
+-import javax.persistence.EntityNotFoundException;
+-import java.util.Map;
+-import java.util.stream.Collectors;
+-
+-import static org.springframework.boot.web.error.ErrorAttributeOptions.Include.MESSAGE;
+-
+-@RestControllerAdvice
+-@AllArgsConstructor
+-@Slf4j
+-public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
+-    private final ErrorAttributes errorAttributes;
+-
+-    @ExceptionHandler(AppException.class)
+-    public ResponseEntity<?> appException(WebRequest request, AppException ex) {
+-        log.error("ApplicationException: {}", ex.getMessage());
+-        return createResponseEntity(request, ex.getOptions(), null, ex.getStatus());
+-    }
+-
+-    @ExceptionHandler(EntityNotFoundException.class)
+-    public ResponseEntity<?> entityNotFoundException(WebRequest request, EntityNotFoundException ex) {
+-        log.error("EntityNotFoundException: {}", ex.getMessage());
+-        return createResponseEntity(request, ErrorAttributeOptions.of(MESSAGE), null, HttpStatus.UNPROCESSABLE_ENTITY);
+-    }
+-
+-    @NonNull
+-    @Override
+-    protected ResponseEntity<Object> handleExceptionInternal(
+-            @NonNull Exception ex, Object body, @NonNull HttpHeaders headers, @NonNull HttpStatus status, @NonNull WebRequest request) {
+-        log.error("Exception", ex);
+-        super.handleExceptionInternal(ex, body, headers, status, request);
+-        return createResponseEntity(request, ErrorAttributeOptions.of(), ValidationUtil.getRootCause(ex).getMessage(), status);
+-    }
+-
+-    @NonNull
+-    @Override
+-    protected ResponseEntity<Object> handleMethodArgumentNotValid(
+-            MethodArgumentNotValidException ex,
+-            @NonNull HttpHeaders headers, @NonNull HttpStatus status, @NonNull WebRequest request) {
+-        return handleBindingErrors(ex.getBindingResult(), request);
+-    }
+-
+-    @NonNull
+-    @Override
+-    protected ResponseEntity<Object> handleBindException(
+-            BindException ex, @NonNull HttpHeaders headers, @NonNull HttpStatus status, @NonNull WebRequest request) {
+-        return handleBindingErrors(ex.getBindingResult(), request);
+-    }
+-
+-    private ResponseEntity<Object> handleBindingErrors(BindingResult result, WebRequest request) {
+-        String msg = result.getFieldErrors().stream()
+-                .map(fe -> String.format("[%s] %s", fe.getField(), fe.getDefaultMessage()))
+-                .collect(Collectors.joining("\n"));
+-        return createResponseEntity(request, ErrorAttributeOptions.defaults(), msg, HttpStatus.UNPROCESSABLE_ENTITY);
+-    }
+-
+-    @SuppressWarnings("unchecked")
+-    private <T> ResponseEntity<T> createResponseEntity(WebRequest request, ErrorAttributeOptions options, String msg, HttpStatus status) {
+-        Map<String, Object> body = errorAttributes.getErrorAttributes(request, options);
+-        if (msg != null) {
+-            body.put("message", msg);
+-        }
+-        body.put("status", status.value());
+-        body.put("error", status.getReasonPhrase());
+-        return (ResponseEntity<T>) ResponseEntity.status(status).body(body);
+-    }
+-}
+Index: src/main/java/ru/javaops/bootjava/web/SecurityUtil.java
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/web/SecurityUtil.java b/src/main/java/ru/javaops/bootjava/web/SecurityUtil.java
+deleted file mode 100644
+--- a/src/main/java/ru/javaops/bootjava/web/SecurityUtil.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ /dev/null	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
+@@ -1,33 +0,0 @@
+-package ru.javaops.bootjava.web;
+-
+-import lombok.experimental.UtilityClass;
+-import org.springframework.security.core.Authentication;
+-import org.springframework.security.core.context.SecurityContextHolder;
+-import ru.javaops.bootjava.model.User;
+-
+-import static java.util.Objects.requireNonNull;
+-
+-@UtilityClass
+-public class SecurityUtil {
+-
+-    public static AuthUser safeGet() {
+-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+-        if (auth == null) {
+-            return null;
+-        }
+-        Object principal = auth.getPrincipal();
+-        return (principal instanceof AuthUser) ? (AuthUser) principal : null;
+-    }
+-
+-    public static AuthUser get() {
+-        return requireNonNull(safeGet(), "No authorized user found");
+-    }
+-
+-    public static User authUser() {
+-        return get().getUser();
+-    }
+-
+-    public static int authId() {
+-        return get().getUser().id();
+-    }
+-}
+\ No newline at end of file
+Index: src/main/resources/application.yaml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/resources/application.yaml b/src/main/resources/application.yaml
+--- a/src/main/resources/application.yaml	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/resources/application.yaml	(date 1687552101285)
+@@ -51,4 +51,6 @@
+   encoding:
+     charset: UTF-8 # Charset of HTTP requests and responses. Added to the "Content-Type" header if not set explicitly
+     enabled: true # Enable http encoding support
+-    force: true
+\ No newline at end of file
++    force: true
++
++springdoc.swagger-ui.path: /
+Index: src/test/java/ru/javaops/bootjava/web/user/AdminUserControllerTest.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/test/java/ru/javaops/bootjava/web/user/AdminUserControllerTest.java b/src/test/java/ru/javaops/bootjava/web/user/AdminUserControllerTest.java
+--- a/src/test/java/ru/javaops/bootjava/web/user/AdminUserControllerTest.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/test/java/ru/javaops/bootjava/web/user/AdminUserControllerTest.java	(date 1687551772978)
+@@ -18,20 +18,20 @@
+ import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.print;
+ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+-import static ru.javaops.bootjava.web.user.UniqueMailValidator.EXCEPTION_DUPLICATE_EMAIL;
++import static ru.javaops.bootjava.web.user.AdminUserController.REST_URL;
+ import static ru.javaops.bootjava.web.user.UserTestData.*;
+ 
+ class AdminUserControllerTest extends AbstractControllerTest {
+ 
+-    private static final String REST_URL = AdminUserController.REST_URL + '/';
++    private static final String REST_URL_SLASH = REST_URL + '/';
+ 
+     @Autowired
+-    private UserRepository userRepository;
++    private UserRepository repository;
+ 
+     @Test
+     @WithUserDetails(value = ADMIN_MAIL)
+     void get() throws Exception {
+-        perform(MockMvcRequestBuilders.get(REST_URL + ADMIN_ID))
++        perform(MockMvcRequestBuilders.get(REST_URL_SLASH + ADMIN_ID))
+                 .andExpect(status().isOk())
+                 .andDo(print())
+                 // https://jira.spring.io/browse/SPR-14472
+@@ -42,7 +42,7 @@
+     @Test
+     @WithUserDetails(value = ADMIN_MAIL)
+     void getNotFound() throws Exception {
+-        perform(MockMvcRequestBuilders.get(REST_URL + NOT_FOUND))
++        perform(MockMvcRequestBuilders.get(REST_URL_SLASH + NOT_FOUND))
+                 .andDo(print())
+                 .andExpect(status().isNotFound());
+     }
+@@ -50,7 +50,7 @@
+     @Test
+     @WithUserDetails(value = ADMIN_MAIL)
+     void getByEmail() throws Exception {
+-        perform(MockMvcRequestBuilders.get(REST_URL + "by-email?email=" + admin.getEmail()))
++        perform(MockMvcRequestBuilders.get(REST_URL_SLASH + "by-email?email=" + admin.getEmail()))
+                 .andExpect(status().isOk())
+                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                 .andExpect(USER_MATCHER.contentJson(admin));
+@@ -59,33 +59,34 @@
+     @Test
+     @WithUserDetails(value = ADMIN_MAIL)
+     void delete() throws Exception {
+-        perform(MockMvcRequestBuilders.delete(REST_URL + USER_ID))
++        perform(MockMvcRequestBuilders.delete(REST_URL_SLASH + USER_ID))
+                 .andDo(print())
+                 .andExpect(status().isNoContent());
+-        assertFalse(userRepository.findById(USER_ID).isPresent());
++        assertFalse(repository.findById(USER_ID).isPresent());
+     }
+ 
+     @Test
+     @WithUserDetails(value = ADMIN_MAIL)
+     void deleteNotFound() throws Exception {
+-        perform(MockMvcRequestBuilders.delete(REST_URL + NOT_FOUND))
++        perform(MockMvcRequestBuilders.delete(REST_URL_SLASH + NOT_FOUND))
+                 .andDo(print())
+-                .andExpect(status().isUnprocessableEntity());
++                .andExpect(status().isNotFound());
+     }
+ 
+     @Test
+     @WithUserDetails(value = ADMIN_MAIL)
+     void enableNotFound() throws Exception {
+-        perform(MockMvcRequestBuilders.patch(REST_URL + NOT_FOUND)
++        perform(MockMvcRequestBuilders.patch(REST_URL_SLASH + NOT_FOUND)
+                 .param("enabled", "false")
+                 .contentType(MediaType.APPLICATION_JSON))
+                 .andDo(print())
+-                .andExpect(status().isUnprocessableEntity());
++                .andExpect(status().isNotFound());
+     }
+ 
+     @Test
+     void getUnAuth() throws Exception {
+         perform(MockMvcRequestBuilders.get(REST_URL))
++                .andDo(print())
+                 .andExpect(status().isUnauthorized());
+     }
+ 
+@@ -101,13 +102,13 @@
+     void update() throws Exception {
+         User updated = getUpdated();
+         updated.setId(null);
+-        perform(MockMvcRequestBuilders.put(REST_URL + USER_ID)
++        perform(MockMvcRequestBuilders.put(REST_URL_SLASH + USER_ID)
+                 .contentType(MediaType.APPLICATION_JSON)
+                 .content(jsonWithPassword(updated, "newPass")))
+                 .andDo(print())
+                 .andExpect(status().isNoContent());
+ 
+-        USER_MATCHER.assertMatch(userRepository.getById(USER_ID), getUpdated());
++        USER_MATCHER.assertMatch(repository.getExisted(USER_ID), getUpdated());
+     }
+ 
+     @Test
+@@ -123,7 +124,7 @@
+         int newId = created.id();
+         newUser.setId(newId);
+         USER_MATCHER.assertMatch(created, newUser);
+-        USER_MATCHER.assertMatch(userRepository.getById(newId), newUser);
++        USER_MATCHER.assertMatch(repository.getExisted(newId), newUser);
+     }
+ 
+     @Test
+@@ -132,19 +133,19 @@
+         perform(MockMvcRequestBuilders.get(REST_URL))
+                 .andExpect(status().isOk())
+                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+-                .andExpect(USER_MATCHER.contentJson(admin, user));
++                .andExpect(USER_MATCHER.contentJson(admin, guest, user));
+     }
+ 
+     @Test
+     @WithUserDetails(value = ADMIN_MAIL)
+     void enable() throws Exception {
+-        perform(MockMvcRequestBuilders.patch(REST_URL + USER_ID)
++        perform(MockMvcRequestBuilders.patch(REST_URL_SLASH + USER_ID)
+                 .param("enabled", "false")
+                 .contentType(MediaType.APPLICATION_JSON))
+                 .andDo(print())
+                 .andExpect(status().isNoContent());
+ 
+-        assertFalse(userRepository.getById(USER_ID).isEnabled());
++        assertFalse(repository.getExisted(USER_ID).isEnabled());
+     }
+ 
+     @Test
+@@ -163,7 +164,7 @@
+     void updateInvalid() throws Exception {
+         User invalid = new User(user);
+         invalid.setName("");
+-        perform(MockMvcRequestBuilders.put(REST_URL + USER_ID)
++        perform(MockMvcRequestBuilders.put(REST_URL_SLASH + USER_ID)
+                 .contentType(MediaType.APPLICATION_JSON)
+                 .content(jsonWithPassword(invalid, "password")))
+                 .andDo(print())
+@@ -175,7 +176,7 @@
+     void updateHtmlUnsafe() throws Exception {
+         User updated = new User(user);
+         updated.setName("<script>alert(123)</script>");
+-        perform(MockMvcRequestBuilders.put(REST_URL + USER_ID)
++        perform(MockMvcRequestBuilders.put(REST_URL_SLASH + USER_ID)
+                 .contentType(MediaType.APPLICATION_JSON)
+                 .content(jsonWithPassword(updated, "password")))
+                 .andDo(print())
+@@ -188,12 +189,12 @@
+     void updateDuplicate() throws Exception {
+         User updated = new User(user);
+         updated.setEmail(ADMIN_MAIL);
+-        perform(MockMvcRequestBuilders.put(REST_URL + USER_ID)
++        perform(MockMvcRequestBuilders.put(REST_URL_SLASH + USER_ID)
+                 .contentType(MediaType.APPLICATION_JSON)
+                 .content(jsonWithPassword(updated, "password")))
+                 .andDo(print())
+                 .andExpect(status().isUnprocessableEntity())
+-                .andExpect(content().string(containsString(EXCEPTION_DUPLICATE_EMAIL)));
++                .andExpect(content().string(containsString(UniqueMailValidator.EXCEPTION_DUPLICATE_EMAIL)));
+     }
+ 
+     @Test
+@@ -206,6 +207,6 @@
+                 .content(jsonWithPassword(expected, "newPass")))
+                 .andDo(print())
+                 .andExpect(status().isUnprocessableEntity())
+-                .andExpect(content().string(containsString(EXCEPTION_DUPLICATE_EMAIL)));
++                .andExpect(content().string(containsString(UniqueMailValidator.EXCEPTION_DUPLICATE_EMAIL)));
+     }
+ }
+\ No newline at end of file
+Index: src/main/java/ru/javaops/bootjava/util/validation/NoHtmlValidator.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/util/validation/NoHtmlValidator.java b/src/main/java/ru/javaops/bootjava/util/validation/NoHtmlValidator.java
+--- a/src/main/java/ru/javaops/bootjava/util/validation/NoHtmlValidator.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/java/ru/javaops/bootjava/util/validation/NoHtmlValidator.java	(date 1687551772988)
+@@ -1,11 +1,10 @@
+ package ru.javaops.bootjava.util.validation;
+ 
++import jakarta.validation.ConstraintValidator;
++import jakarta.validation.ConstraintValidatorContext;
+ import org.jsoup.Jsoup;
+ import org.jsoup.safety.Safelist;
+ 
+-import javax.validation.ConstraintValidator;
+-import javax.validation.ConstraintValidatorContext;
+-
+ public class NoHtmlValidator implements ConstraintValidator<NoHtml, String> {
+     @Override
+     public boolean isValid(String value, ConstraintValidatorContext ctx) {
+Index: src/main/java/ru/javaops/bootjava/web/user/AdminUserController.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/web/user/AdminUserController.java b/src/main/java/ru/javaops/bootjava/web/user/AdminUserController.java
+--- a/src/main/java/ru/javaops/bootjava/web/user/AdminUserController.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/java/ru/javaops/bootjava/web/user/AdminUserController.java	(date 1687551772935)
+@@ -1,6 +1,6 @@
+ package ru.javaops.bootjava.web.user;
+ 
+-import lombok.extern.slf4j.Slf4j;
++import jakarta.validation.Valid;
+ import org.springframework.data.domain.Sort;
+ import org.springframework.http.HttpStatus;
+ import org.springframework.http.MediaType;
+@@ -10,7 +10,6 @@
+ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
+ import ru.javaops.bootjava.model.User;
+ 
+-import javax.validation.Valid;
+ import java.net.URI;
+ import java.util.List;
+ 
+@@ -19,14 +18,14 @@
+ 
+ @RestController
+ @RequestMapping(value = AdminUserController.REST_URL, produces = MediaType.APPLICATION_JSON_VALUE)
+-@Slf4j
++// TODO: cache only most requested, seldom changed data!
+ public class AdminUserController extends AbstractUserController {
+ 
+     static final String REST_URL = "/api/admin/users";
+ 
+     @Override
+     @GetMapping("/{id}")
+-    public ResponseEntity<User> get(@PathVariable int id) {
++    public User get(@PathVariable int id) {
+         return super.get(id);
+     }
+ 
+@@ -47,7 +46,7 @@
+     public ResponseEntity<User> createWithLocation(@Valid @RequestBody User user) {
+         log.info("create {}", user);
+         checkNew(user);
+-        User created = prepareAndSave(user);
++        User created = repository.prepareAndSave(user);
+         URI uriOfNewResource = ServletUriComponentsBuilder.fromCurrentContextPath()
+                 .path(REST_URL + "/{id}")
+                 .buildAndExpand(created.getId()).toUri();
+@@ -59,13 +58,13 @@
+     public void update(@Valid @RequestBody User user, @PathVariable int id) {
+         log.info("update {} with id={}", user, id);
+         assureIdConsistent(user, id);
+-        prepareAndSave(user);
++        repository.prepareAndSave(user);
+     }
+ 
+     @GetMapping("/by-email")
+-    public ResponseEntity<User> getByEmail(@RequestParam String email) {
++    public User getByEmail(@RequestParam String email) {
+         log.info("getByEmail {}", email);
+-        return ResponseEntity.of(repository.findByEmailIgnoreCase(email));
++        return repository.getExistedByEmail(email);
+     }
+ 
+     @PatchMapping("/{id}")
+@@ -73,7 +72,7 @@
+     @Transactional
+     public void enable(@PathVariable int id, @RequestParam boolean enabled) {
+         log.info(enabled ? "enable {}" : "disable {}", id);
+-        User user = repository.getById(id);
++        User user = repository.getExisted(id);
+         user.setEnabled(enabled);
+     }
+ }
+\ No newline at end of file
+Index: src/main/java/ru/javaops/bootjava/util/validation/NoHtml.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/util/validation/NoHtml.java b/src/main/java/ru/javaops/bootjava/util/validation/NoHtml.java
+--- a/src/main/java/ru/javaops/bootjava/util/validation/NoHtml.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/java/ru/javaops/bootjava/util/validation/NoHtml.java	(date 1687551772974)
+@@ -1,7 +1,8 @@
+ package ru.javaops.bootjava.util.validation;
+ 
+-import javax.validation.Constraint;
+-import javax.validation.Payload;
++import jakarta.validation.Constraint;
++import jakarta.validation.Payload;
++
+ import java.lang.annotation.Documented;
+ import java.lang.annotation.Retention;
+ import java.lang.annotation.Target;
+Index: src/main/java/ru/javaops/bootjava/config/RestAuthenticationEntryPoint.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/config/RestAuthenticationEntryPoint.java b/src/main/java/ru/javaops/bootjava/config/RestAuthenticationEntryPoint.java
+new file mode 100644
+--- /dev/null	(date 1687551772995)
++++ b/src/main/java/ru/javaops/bootjava/config/RestAuthenticationEntryPoint.java	(date 1687551772995)
+@@ -0,0 +1,22 @@
++package ru.javaops.bootjava.config;
++
++import jakarta.servlet.http.HttpServletRequest;
++import jakarta.servlet.http.HttpServletResponse;
++import lombok.AllArgsConstructor;
++import org.springframework.beans.factory.annotation.Qualifier;
++import org.springframework.security.core.AuthenticationException;
++import org.springframework.security.web.AuthenticationEntryPoint;
++import org.springframework.stereotype.Component;
++import org.springframework.web.servlet.HandlerExceptionResolver;
++
++@Component
++@AllArgsConstructor
++public class RestAuthenticationEntryPoint implements AuthenticationEntryPoint {
++    @Qualifier("handlerExceptionResolver")
++    private final HandlerExceptionResolver resolver;
++
++    @Override
++    public void commence(HttpServletRequest request, HttpServletResponse response, AuthenticationException authException) {
++        resolver.resolveException(request, response, null, authException);
++    }
++}
+Index: src/main/resources/data.sql
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/resources/data.sql b/src/main/resources/data.sql
+--- a/src/main/resources/data.sql	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/resources/data.sql	(date 1687552118749)
+@@ -1,8 +1,9 @@
+-INSERT INTO USERS (NAME, EMAIL, PASSWORD)
+-VALUES ('User', 'user@gmail.com', '{noop}password'),
+-       ('Admin', 'admin@javaops.ru', '{noop}admin');
++INSERT INTO USERS (name, email, password)
++VALUES ('User', 'user@yandex.ru', '{noop}password'),
++       ('Admin', 'admin@gmail.com', '{noop}admin'),
++       ('Guest', 'guest@gmail.com', '{noop}guest');
+ 
+-INSERT INTO USER_ROLE (ROLE, USER_ID)
++INSERT INTO USER_ROLE (role, user_id)
+ VALUES ('USER', 1),
+        ('ADMIN', 2),
+        ('USER', 2);
+\ No newline at end of file
+Index: src/main/java/ru/javaops/bootjava/to/UserTo.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/to/UserTo.java b/src/main/java/ru/javaops/bootjava/to/UserTo.java
+--- a/src/main/java/ru/javaops/bootjava/to/UserTo.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/java/ru/javaops/bootjava/to/UserTo.java	(date 1687551772991)
+@@ -1,14 +1,13 @@
+ package ru.javaops.bootjava.to;
+ 
++import jakarta.validation.constraints.Email;
++import jakarta.validation.constraints.NotBlank;
++import jakarta.validation.constraints.Size;
+ import lombok.EqualsAndHashCode;
+ import lombok.Value;
+ import ru.javaops.bootjava.HasIdAndEmail;
+ import ru.javaops.bootjava.util.validation.NoHtml;
+ 
+-import javax.validation.constraints.Email;
+-import javax.validation.constraints.NotBlank;
+-import javax.validation.constraints.Size;
+-
+ @Value
+ @EqualsAndHashCode(callSuper = true)
+ public class UserTo extends NamedTo implements HasIdAndEmail {
+Index: src/main/java/ru/javaops/bootjava/repository/UserRepository.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/repository/UserRepository.java b/src/main/java/ru/javaops/bootjava/repository/UserRepository.java
+--- a/src/main/java/ru/javaops/bootjava/repository/UserRepository.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/java/ru/javaops/bootjava/repository/UserRepository.java	(date 1687551772901)
+@@ -1,16 +1,27 @@
+ package ru.javaops.bootjava.repository;
+ 
+-import io.swagger.v3.oas.annotations.tags.Tag;
+ import org.springframework.data.jpa.repository.Query;
+ import org.springframework.transaction.annotation.Transactional;
++import ru.javaops.bootjava.error.NotFoundException;
+ import ru.javaops.bootjava.model.User;
+ 
+ import java.util.Optional;
+ 
++import static ru.javaops.bootjava.config.SecurityConfig.PASSWORD_ENCODER;
++
+ @Transactional(readOnly = true)
+-@Tag(name = "User Controller")
+ public interface UserRepository extends BaseRepository<User> {
+-
+     @Query("SELECT u FROM User u WHERE u.email = LOWER(:email)")
+     Optional<User> findByEmailIgnoreCase(String email);
++
++    @Transactional
++    default User prepareAndSave(User user) {
++        user.setPassword(PASSWORD_ENCODER.encode(user.getPassword()));
++        user.setEmail(user.getEmail().toLowerCase());
++        return save(user);
++    }
++
++    default User getExistedByEmail(String email) {
++        return findByEmailIgnoreCase(email).orElseThrow(() -> new NotFoundException("User with email=" + email + " not found"));
++    }
+ }
+\ No newline at end of file
+Index: src/main/java/ru/javaops/bootjava/repository/BaseRepository.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/repository/BaseRepository.java b/src/main/java/ru/javaops/bootjava/repository/BaseRepository.java
+--- a/src/main/java/ru/javaops/bootjava/repository/BaseRepository.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/java/ru/javaops/bootjava/repository/BaseRepository.java	(date 1687551773017)
+@@ -5,8 +5,7 @@
+ import org.springframework.data.jpa.repository.Query;
+ import org.springframework.data.repository.NoRepositoryBean;
+ import org.springframework.transaction.annotation.Transactional;
+-
+-import static ru.javaops.bootjava.util.validation.ValidationUtil.checkModification;
++import ru.javaops.bootjava.error.NotFoundException;
+ 
+ // https://stackoverflow.com/questions/42781264/multiple-base-repositories-in-spring-data-jpa
+ @NoRepositoryBean
+@@ -15,10 +14,18 @@
+     //    https://docs.spring.io/spring-data/jpa/docs/current/reference/html/#jpa.query.spel-expressions
+     @Transactional
+     @Modifying
+-    @Query("DELETE FROM #{#entityName} u WHERE u.id=:id")
++    @Query("DELETE FROM #{#entityName} e WHERE e.id=:id")
+     int delete(int id);
+ 
++    //  https://stackoverflow.com/a/60695301/548473 (existed delete code 204, not existed: 404)
++    @SuppressWarnings("all") // transaction invoked
+     default void deleteExisted(int id) {
+-        checkModification(delete(id), id);
++        if (delete(id) == 0) {
++            throw new NotFoundException("Entity with id=" + id + " not found");
++        }
++    }
++
++    default T getExisted(int id) {
++        return findById(id).orElseThrow(() -> new NotFoundException("Entity with id=" + id + " not found"));
+     }
+ }
+\ No newline at end of file
+Index: lombok.config
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/lombok.config b/lombok.config
+new file mode 100644
+--- /dev/null	(date 1682075005684)
++++ b/lombok.config	(date 1682075005684)
+@@ -0,0 +1,1 @@
++lombok.copyableAnnotations += org.springframework.beans.factory.annotation.Qualifier
+\ No newline at end of file
+Index: src/main/java/ru/javaops/bootjava/error/DataConflictException.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/error/DataConflictException.java b/src/main/java/ru/javaops/bootjava/error/DataConflictException.java
+new file mode 100644
+--- /dev/null	(date 1687551773006)
++++ b/src/main/java/ru/javaops/bootjava/error/DataConflictException.java	(date 1687551773006)
+@@ -0,0 +1,7 @@
++package ru.javaops.bootjava.error;
++
++public class DataConflictException extends AppException {
++    public DataConflictException(String msg) {
++        super(msg);
++    }
++}
+\ No newline at end of file
+Index: src/main/java/ru/javaops/bootjava/error/AppException.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/error/AppException.java b/src/main/java/ru/javaops/bootjava/error/AppException.java
+--- a/src/main/java/ru/javaops/bootjava/error/AppException.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/java/ru/javaops/bootjava/error/AppException.java	(date 1687551772948)
+@@ -1,21 +1,10 @@
+ package ru.javaops.bootjava.error;
+ 
+-import lombok.Getter;
+-import org.springframework.boot.web.error.ErrorAttributeOptions;
+-import org.springframework.http.HttpStatus;
+-import org.springframework.web.server.ResponseStatusException;
++import org.springframework.lang.NonNull;
+ 
+-@Getter
+-public class AppException extends ResponseStatusException {
+-    private final ErrorAttributeOptions options;
++public class AppException extends RuntimeException {
+ 
+-    public AppException(HttpStatus status, String message, ErrorAttributeOptions options) {
+-        super(status, message);
+-        this.options = options;
+-    }
+-
+-    @Override
+-    public String getMessage() {
+-        return getReason();
++    public AppException(@NonNull String message) {
++        super(message);
+     }
+ }
+Index: src/main/java/ru/javaops/bootjava/model/NamedEntity.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/model/NamedEntity.java b/src/main/java/ru/javaops/bootjava/model/NamedEntity.java
+--- a/src/main/java/ru/javaops/bootjava/model/NamedEntity.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/java/ru/javaops/bootjava/model/NamedEntity.java	(date 1687551772942)
+@@ -1,16 +1,15 @@
+ package ru.javaops.bootjava.model;
+ 
++import jakarta.persistence.Column;
++import jakarta.persistence.MappedSuperclass;
++import jakarta.validation.constraints.NotBlank;
++import jakarta.validation.constraints.Size;
+ import lombok.AccessLevel;
+ import lombok.Getter;
+ import lombok.NoArgsConstructor;
+ import lombok.Setter;
+ import ru.javaops.bootjava.util.validation.NoHtml;
+ 
+-import javax.persistence.Column;
+-import javax.persistence.MappedSuperclass;
+-import javax.validation.constraints.NotBlank;
+-import javax.validation.constraints.Size;
+-
+ 
+ @MappedSuperclass
+ @Getter
+Index: README.md
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/README.md b/README.md
+--- a/README.md	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/README.md	(date 1692639982556)
+@@ -1,8 +1,19 @@
+ <img src="http://javaops.ru/static/img/logo/javaops_30.png" width="223"/>
+ 
+ Открытый курс для всех желающих приобщиться к живой современной разработке на Java
+-# [Разработка Spring Boot 2.x HATEOAS приложения (BootJava)](http://javaops.ru/view/bootjava?ref=gh)
++# [Разработка Spring Boot 3.x HATEOAS приложения (BootJava)](http://javaops.ru/view/bootjava?ref=gh)
+ ## [Программа](http://javaops.ru/view/bootjava#program)
+ 
+-### Java приложения на самом современном и востребованном стеке: Spring Boot 2.x, Spring Data Rest/HATEOAS, Lombok, JPA, H2, ....
+-Мы создадим с нуля основу любого современного REST веб-приложения: аутентификация и авторизация на основе ролей, регистрация пользователя в приложении, управление своим профилем и администрирование пользователей.
+\ No newline at end of file
++### Java приложения на самом современном и востребованном стеке: Spring Boot 3.x, Spring Data Rest/HATEOAS, Lombok, JPA, H2, ....
++Мы создадим с нуля основу любого современного REST веб-приложения: аутентификация и авторизация на основе ролей, регистрация пользователя в приложении, управление своим профилем и администрирование пользователей.
++-------------------------------------------------------------
++- Stack: [JDK 17](http://jdk.java.net/17/), Spring Boot 3.x, Lombok, H2, Caffeine Cache, SpringDoc OpenApi 2.x
++- Run: `mvn spring-boot:run` in root directory.
++-----------------------------------------------------
++[REST API documentation](http://localhost:8080/)
++Креденшелы:
++```
++User:  user@yandex.ru / password
++Admin: admin@gmail.com / admin
++Guest: guest@gmail.com / guest
++```
+Index: src/main/java/ru/javaops/bootjava/model/BaseEntity.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/model/BaseEntity.java b/src/main/java/ru/javaops/bootjava/model/BaseEntity.java
+--- a/src/main/java/ru/javaops/bootjava/model/BaseEntity.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/java/ru/javaops/bootjava/model/BaseEntity.java	(date 1687551772951)
+@@ -1,15 +1,13 @@
+ package ru.javaops.bootjava.model;
+ 
+-import com.fasterxml.jackson.annotation.JsonIgnore;
+ import io.swagger.v3.oas.annotations.media.Schema;
++import jakarta.persistence.*;
+ import lombok.*;
+ import org.springframework.data.domain.Persistable;
+ import org.springframework.data.util.ProxyUtils;
+ import org.springframework.util.Assert;
+ import ru.javaops.bootjava.HasId;
+ 
+-import javax.persistence.*;
+-
+ @MappedSuperclass
+ //  https://stackoverflow.com/a/6084701/548473
+ @Access(AccessType.FIELD)
+@@ -30,7 +28,6 @@
+         return id;
+     }
+ 
+-    @JsonIgnore
+     @Override
+     public boolean isNew() {
+         return id == null;
+Index: src/main/java/ru/javaops/bootjava/error/NotFoundException.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/error/NotFoundException.java b/src/main/java/ru/javaops/bootjava/error/NotFoundException.java
+new file mode 100644
+--- /dev/null	(date 1687551772930)
++++ b/src/main/java/ru/javaops/bootjava/error/NotFoundException.java	(date 1687551772930)
+@@ -0,0 +1,7 @@
++package ru.javaops.bootjava.error;
++
++public class NotFoundException extends AppException {
++    public NotFoundException(String msg) {
++        super(msg);
++    }
++}
+\ No newline at end of file
+Index: src/main/java/ru/javaops/bootjava/to/NamedTo.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/to/NamedTo.java b/src/main/java/ru/javaops/bootjava/to/NamedTo.java
+--- a/src/main/java/ru/javaops/bootjava/to/NamedTo.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/java/ru/javaops/bootjava/to/NamedTo.java	(date 1687551772910)
+@@ -1,12 +1,11 @@
+ package ru.javaops.bootjava.to;
+ 
++import jakarta.validation.constraints.NotBlank;
++import jakarta.validation.constraints.Size;
+ import lombok.Data;
+ import lombok.EqualsAndHashCode;
+ import ru.javaops.bootjava.util.validation.NoHtml;
+ 
+-import javax.validation.constraints.NotBlank;
+-import javax.validation.constraints.Size;
+-
+ @Data
+ @EqualsAndHashCode(callSuper = true)
+ public class NamedTo extends BaseTo {
+Index: src/main/java/ru/javaops/bootjava/util/validation/ValidationUtil.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/util/validation/ValidationUtil.java b/src/main/java/ru/javaops/bootjava/util/validation/ValidationUtil.java
+--- a/src/main/java/ru/javaops/bootjava/util/validation/ValidationUtil.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/java/ru/javaops/bootjava/util/validation/ValidationUtil.java	(date 1687551772906)
+@@ -1,8 +1,6 @@
+ package ru.javaops.bootjava.util.validation;
+ 
+ import lombok.experimental.UtilityClass;
+-import org.springframework.core.NestedExceptionUtils;
+-import org.springframework.lang.NonNull;
+ import ru.javaops.bootjava.HasId;
+ import ru.javaops.bootjava.error.IllegalRequestDataException;
+ 
+@@ -23,17 +21,4 @@
+             throw new IllegalRequestDataException(bean.getClass().getSimpleName() + " must has id=" + id);
+         }
+     }
+-
+-    public static void checkModification(int count, int id) {
+-        if (count == 0) {
+-            throw new IllegalRequestDataException("Entity with id=" + id + " not found");
+-        }
+-    }
+-
+-    //  https://stackoverflow.com/a/65442410/548473
+-    @NonNull
+-    public static Throwable getRootCause(@NonNull Throwable t) {
+-        Throwable rootCause = NestedExceptionUtils.getRootCause(t);
+-        return rootCause != null ? rootCause : t;
+-    }
+ }
+\ No newline at end of file
+Index: src/main/java/ru/javaops/bootjava/util/UserUtil.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/util/UserUtil.java b/src/main/java/ru/javaops/bootjava/util/UsersUtil.java
+rename from src/main/java/ru/javaops/bootjava/util/UserUtil.java
+rename to src/main/java/ru/javaops/bootjava/util/UsersUtil.java
+--- a/src/main/java/ru/javaops/bootjava/util/UserUtil.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/java/ru/javaops/bootjava/util/UsersUtil.java	(date 1687552318786)
+@@ -1,16 +1,12 @@
+ package ru.javaops.bootjava.util;
+ 
+ import lombok.experimental.UtilityClass;
+-import org.springframework.security.crypto.factory.PasswordEncoderFactories;
+-import org.springframework.security.crypto.password.PasswordEncoder;
+ import ru.javaops.bootjava.model.Role;
+ import ru.javaops.bootjava.model.User;
+ import ru.javaops.bootjava.to.UserTo;
+ 
+ @UtilityClass
+-public class UserUtil {
+-
+-    public static final PasswordEncoder PASSWORD_ENCODER = PasswordEncoderFactories.createDelegatingPasswordEncoder();
++public class UsersUtil {
+ 
+     public static User createNewFromTo(UserTo userTo) {
+         return new User(null, userTo.getName(), userTo.getEmail().toLowerCase(), userTo.getPassword(), Role.USER);
+@@ -22,10 +18,4 @@
+         user.setPassword(userTo.getPassword());
+         return user;
+     }
+-
+-    public static User prepareToSave(User user) {
+-        user.setPassword(PASSWORD_ENCODER.encode(user.getPassword()));
+-        user.setEmail(user.getEmail().toLowerCase());
+-        return user;
+-    }
+ }
+\ No newline at end of file
+Index: src/main/java/ru/javaops/bootjava/web/user/UniqueMailValidator.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/web/user/UniqueMailValidator.java b/src/main/java/ru/javaops/bootjava/web/user/UniqueMailValidator.java
+--- a/src/main/java/ru/javaops/bootjava/web/user/UniqueMailValidator.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/java/ru/javaops/bootjava/web/user/UniqueMailValidator.java	(date 1687551772938)
+@@ -1,5 +1,6 @@
+ package ru.javaops.bootjava.web.user;
+ 
++import jakarta.servlet.http.HttpServletRequest;
+ import lombok.AllArgsConstructor;
+ import org.springframework.lang.NonNull;
+ import org.springframework.stereotype.Component;
+@@ -7,9 +8,7 @@
+ import org.springframework.validation.Errors;
+ import ru.javaops.bootjava.HasIdAndEmail;
+ import ru.javaops.bootjava.repository.UserRepository;
+-import ru.javaops.bootjava.web.SecurityUtil;
+-
+-import javax.servlet.http.HttpServletRequest;
++import ru.javaops.bootjava.web.AuthUser;
+ 
+ @Component
+ @AllArgsConstructor
+@@ -33,13 +32,13 @@
+                         if (request.getMethod().equals("PUT")) {  // UPDATE
+                             int dbId = dbUser.id();
+ 
+-                            // it is ok, if update ourself
++                            // it is ok, if update ourselves
+                             if (user.getId() != null && dbId == user.id()) return;
+ 
+                             // Workaround for update with user.id=null in request body
+                             // ValidationUtil.assureIdConsistent called after this validation
+                             String requestURI = request.getRequestURI();
+-                            if (requestURI.endsWith("/" + dbId) || (dbId == SecurityUtil.authId() && requestURI.contains("/profile")))
++                            if (requestURI.endsWith("/" + dbId) || (dbId == AuthUser.authId() && requestURI.contains("/profile")))
+                                 return;
+                         }
+                         errors.rejectValue("email", "", EXCEPTION_DUPLICATE_EMAIL);
+Index: src/main/java/ru/javaops/bootjava/web/AuthUser.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/web/AuthUser.java b/src/main/java/ru/javaops/bootjava/web/AuthUser.java
+--- a/src/main/java/ru/javaops/bootjava/web/AuthUser.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/java/ru/javaops/bootjava/web/AuthUser.java	(date 1687551773010)
+@@ -1,12 +1,15 @@
+ package ru.javaops.bootjava.web;
+ 
+ import lombok.Getter;
+-import lombok.ToString;
+ import org.springframework.lang.NonNull;
++import org.springframework.security.core.Authentication;
++import org.springframework.security.core.context.SecurityContextHolder;
++import ru.javaops.bootjava.model.Role;
+ import ru.javaops.bootjava.model.User;
+ 
++import static java.util.Objects.requireNonNull;
++
+ @Getter
+-@ToString(of = "user")
+ public class AuthUser extends org.springframework.security.core.userdetails.User {
+ 
+     private final User user;
+@@ -19,4 +22,33 @@
+     public int id() {
+         return user.id();
+     }
++
++    public static AuthUser safeGet() {
++        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
++        if (auth == null) {
++            return null;
++        }
++        return (auth.getPrincipal() instanceof AuthUser au) ? au : null;
++    }
++
++    public static AuthUser get() {
++        return requireNonNull(safeGet(), "No authorized user found");
++    }
++
++    public static User authUser() {
++        return get().getUser();
++    }
++
++    public static int authId() {
++        return get().id();
++    }
++
++    public boolean hasRole(Role role) {
++        return user.hasRole(role);
++    }
++
++    @Override
++    public String toString() {
++        return "AuthUser:" + id() + '[' + user.getEmail() + ']';
++    }
+ }
+\ No newline at end of file
+Index: src/main/java/ru/javaops/bootjava/web/user/AbstractUserController.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/web/user/AbstractUserController.java b/src/main/java/ru/javaops/bootjava/web/user/AbstractUserController.java
+--- a/src/main/java/ru/javaops/bootjava/web/user/AbstractUserController.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/java/ru/javaops/bootjava/web/user/AbstractUserController.java	(date 1687551772982)
+@@ -1,16 +1,16 @@
+ package ru.javaops.bootjava.web.user;
+ 
+-import lombok.extern.slf4j.Slf4j;
++import org.slf4j.Logger;
+ import org.springframework.beans.factory.annotation.Autowired;
+-import org.springframework.http.ResponseEntity;
+ import org.springframework.web.bind.WebDataBinder;
+ import org.springframework.web.bind.annotation.InitBinder;
+ import ru.javaops.bootjava.model.User;
+ import ru.javaops.bootjava.repository.UserRepository;
+-import ru.javaops.bootjava.util.UserUtil;
+ 
+-@Slf4j
++import static org.slf4j.LoggerFactory.getLogger;
++
+ public abstract class AbstractUserController {
++    protected final Logger log = getLogger(getClass());
+ 
+     @Autowired
+     protected UserRepository repository;
+@@ -23,17 +23,13 @@
+         binder.addValidators(emailValidator);
+     }
+ 
+-    public ResponseEntity<User> get(int id) {
++    public User get(int id) {
+         log.info("get {}", id);
+-        return ResponseEntity.of(repository.findById(id));
++        return repository.getExisted(id);
+     }
+ 
+     public void delete(int id) {
+         log.info("delete {}", id);
+         repository.deleteExisted(id);
+     }
+-
+-    protected User prepareAndSave(User user) {
+-        return repository.save(UserUtil.prepareToSave(user));
+-    }
+ }
+\ No newline at end of file
+Index: src/main/java/ru/javaops/bootjava/model/User.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/model/User.java b/src/main/java/ru/javaops/bootjava/model/User.java
+--- a/src/main/java/ru/javaops/bootjava/model/User.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/java/ru/javaops/bootjava/model/User.java	(date 1692639414601)
+@@ -1,6 +1,11 @@
+ package ru.javaops.bootjava.model;
+ 
+ import com.fasterxml.jackson.annotation.JsonProperty;
++import jakarta.persistence.*;
++import jakarta.validation.constraints.Email;
++import jakarta.validation.constraints.NotBlank;
++import jakarta.validation.constraints.NotNull;
++import jakarta.validation.constraints.Size;
+ import lombok.AccessLevel;
+ import lombok.Getter;
+ import lombok.NoArgsConstructor;
+@@ -11,26 +16,15 @@
+ import ru.javaops.bootjava.HasIdAndEmail;
+ import ru.javaops.bootjava.util.validation.NoHtml;
+ 
+-import javax.persistence.*;
+-import javax.validation.constraints.Email;
+-import javax.validation.constraints.NotBlank;
+-import javax.validation.constraints.NotNull;
+-import javax.validation.constraints.Size;
+-import java.io.Serial;
+-import java.io.Serializable;
+-import java.util.Collection;
+-import java.util.Date;
+-import java.util.EnumSet;
+-import java.util.Set;
++import java.util.*;
+ 
+ @Entity
+ @Table(name = "users")
+ @Getter
+ @Setter
+ @NoArgsConstructor(access = AccessLevel.PROTECTED)
+-public class User extends NamedEntity implements HasIdAndEmail, Serializable {
+-    @Serial
+-    private static final long serialVersionUID = 1L;
++public class User extends NamedEntity implements HasIdAndEmail {
++// No session, no needs Serializable
+ 
+     @Column(name = "email", nullable = false, unique = true)
+     @Email
+@@ -41,7 +35,7 @@
+ 
+     @Column(name = "password", nullable = false)
+     @NotBlank
+-    @Size(max = 256)
++    @Size(max = 128)
+     // https://stackoverflow.com/a/12505165/548473
+     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+     private String password;
+@@ -57,10 +51,10 @@
+     @Enumerated(EnumType.STRING)
+     @CollectionTable(name = "user_role",
+             joinColumns = @JoinColumn(name = "user_id"),
+-            uniqueConstraints = @UniqueConstraint(columnNames = {"user_id", "role"}, name = "uk_user_roles"))
++            uniqueConstraints = @UniqueConstraint(columnNames = {"user_id", "role"}, name = "uk_user_role"))
+     @Column(name = "role")
+     @ElementCollection(fetch = FetchType.EAGER)
+-    @JoinColumn(name = "user_id") //https://stackoverflow.com/a/62848296/548473
++    @JoinColumn
+     @OnDelete(action = OnDeleteAction.CASCADE)
+     private Set<Role> roles;
+ 
+@@ -68,8 +62,8 @@
+         this(u.id, u.name, u.email, u.password, u.enabled, u.registered, u.roles);
+     }
+ 
+-    public User(Integer id, String name, String email, String password, Role role, Role... roles) {
+-        this(id, name, email, password, true, new Date(), EnumSet.of(role, roles));
++    public User(Integer id, String name, String email, String password, Role... roles) {
++        this(id, name, email, password, true, new Date(), Arrays.asList(roles));
+     }
+ 
+     public User(Integer id, String name, String email, String password, boolean enabled, Date registered, Collection<Role> roles) {
+@@ -85,6 +79,10 @@
+         this.roles = CollectionUtils.isEmpty(roles) ? EnumSet.noneOf(Role.class) : EnumSet.copyOf(roles);
+     }
+ 
++    public boolean hasRole(Role role) {
++        return roles != null && roles.contains(role);
++    }
++
+     @Override
+     public String toString() {
+         return "User:" + id + '[' + email + ']';
+Index: src/main/java/ru/javaops/bootjava/error/IllegalRequestDataException.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/error/IllegalRequestDataException.java b/src/main/java/ru/javaops/bootjava/error/IllegalRequestDataException.java
+--- a/src/main/java/ru/javaops/bootjava/error/IllegalRequestDataException.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/java/ru/javaops/bootjava/error/IllegalRequestDataException.java	(date 1687551772932)
+@@ -1,12 +1,7 @@
+ package ru.javaops.bootjava.error;
+ 
+-import org.springframework.boot.web.error.ErrorAttributeOptions;
+-import org.springframework.http.HttpStatus;
+-
+-import static org.springframework.boot.web.error.ErrorAttributeOptions.Include.MESSAGE;
+-
+ public class IllegalRequestDataException extends AppException {
+     public IllegalRequestDataException(String msg) {
+-        super(HttpStatus.UNPROCESSABLE_ENTITY, msg, ErrorAttributeOptions.of(MESSAGE));
++        super(msg);
+     }
+ }
+\ No newline at end of file
+Index: src/main/java/ru/javaops/bootjava/error/ErrorType.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/error/ErrorType.java b/src/main/java/ru/javaops/bootjava/error/ErrorType.java
+new file mode 100644
+--- /dev/null	(date 1692638409356)
++++ b/src/main/java/ru/javaops/bootjava/error/ErrorType.java	(date 1692638409356)
+@@ -0,0 +1,22 @@
++package ru.javaops.bootjava.error;
++
++import org.springframework.http.HttpStatus;
++
++public enum ErrorType {
++    APP_ERROR("Application error", HttpStatus.INTERNAL_SERVER_ERROR),
++    BAD_DATA("Wrong data", HttpStatus.UNPROCESSABLE_ENTITY),
++    BAD_REQUEST("Bad request", HttpStatus.UNPROCESSABLE_ENTITY),
++    DATA_CONFLICT("DataBase conflict", HttpStatus.CONFLICT),
++    NOT_FOUND("Resource not found", HttpStatus.NOT_FOUND),
++    AUTH_ERROR("Authorization error", HttpStatus.FORBIDDEN),
++    UNAUTHORIZED("Request unauthorized", HttpStatus.UNAUTHORIZED),
++    FORBIDDEN("Request forbidden", HttpStatus.FORBIDDEN);
++
++    ErrorType(String title, HttpStatus status) {
++        this.title = title;
++        this.status = status;
++    }
++
++    public final String title;
++    public final HttpStatus status;
++}
+Index: src/main/java/ru/javaops/bootjava/web/user/ProfileController.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/web/user/ProfileController.java b/src/main/java/ru/javaops/bootjava/web/user/ProfileController.java
+--- a/src/main/java/ru/javaops/bootjava/web/user/ProfileController.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/java/ru/javaops/bootjava/web/user/ProfileController.java	(date 1687552388403)
+@@ -1,5 +1,6 @@
+ package ru.javaops.bootjava.web.user;
+ 
++import jakarta.validation.Valid;
+ import lombok.extern.slf4j.Slf4j;
+ import org.springframework.http.HttpStatus;
+ import org.springframework.http.MediaType;
+@@ -10,10 +11,9 @@
+ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
+ import ru.javaops.bootjava.model.User;
+ import ru.javaops.bootjava.to.UserTo;
+-import ru.javaops.bootjava.util.UserUtil;
++import ru.javaops.bootjava.util.UsersUtil;
+ import ru.javaops.bootjava.web.AuthUser;
+ 
+-import javax.validation.Valid;
+ import java.net.URI;
+ 
+ import static ru.javaops.bootjava.util.validation.ValidationUtil.assureIdConsistent;
+@@ -22,11 +22,13 @@
+ @RestController
+ @RequestMapping(value = ProfileController.REST_URL, produces = MediaType.APPLICATION_JSON_VALUE)
+ @Slf4j
++// TODO: cache only most requested data!
+ public class ProfileController extends AbstractUserController {
+     static final String REST_URL = "/api/profile";
+ 
+     @GetMapping
+     public User get(@AuthenticationPrincipal AuthUser authUser) {
++        log.info("get {}", authUser);
+         return authUser.getUser();
+     }
+ 
+@@ -41,7 +43,7 @@
+     public ResponseEntity<User> register(@Valid @RequestBody UserTo userTo) {
+         log.info("register {}", userTo);
+         checkNew(userTo);
+-        User created = prepareAndSave(UserUtil.createNewFromTo(userTo));
++        User created = repository.prepareAndSave(UsersUtil.createNewFromTo(userTo));
+         URI uriOfNewResource = ServletUriComponentsBuilder.fromCurrentContextPath()
+                 .path(REST_URL).build().toUri();
+         return ResponseEntity.created(uriOfNewResource).body(created);
+@@ -51,8 +53,9 @@
+     @ResponseStatus(HttpStatus.NO_CONTENT)
+     @Transactional
+     public void update(@RequestBody @Valid UserTo userTo, @AuthenticationPrincipal AuthUser authUser) {
++        log.info("update {} with id={}", userTo, authUser.id());
+         assureIdConsistent(userTo, authUser.id());
+         User user = authUser.getUser();
+-        prepareAndSave(UserUtil.updateFromTo(user, userTo));
++        repository.prepareAndSave(UsersUtil.updateFromTo(user, userTo));
+     }
+ }
+\ No newline at end of file
+Index: src/main/java/ru/javaops/bootjava/config/OpenApiConfig.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/config/OpenApiConfig.java b/src/main/java/ru/javaops/bootjava/config/OpenApiConfig.java
+--- a/src/main/java/ru/javaops/bootjava/config/OpenApiConfig.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/java/ru/javaops/bootjava/config/OpenApiConfig.java	(date 1687551772954)
+@@ -6,7 +6,7 @@
+ import io.swagger.v3.oas.annotations.info.Info;
+ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+ import io.swagger.v3.oas.annotations.security.SecurityScheme;
+-import org.springdoc.core.GroupedOpenApi;
++import org.springdoc.core.models.GroupedOpenApi;
+ import org.springframework.context.annotation.Bean;
+ import org.springframework.context.annotation.Configuration;
+ 
+@@ -22,10 +22,11 @@
+                 title = "REST API documentation",
+                 version = "1.0",
+                 description = """
+-                        Приложение по <a href='https://javaops.ru/view/bootjava'>курсу BootJava</a>
++                        Приложение по <a href='https://javaops.ru/view/topjava2'>курсу TopJava-2</a>: решение выпускного проекта
+                         <p><b>Тестовые креденшелы:</b><br>
+-                        - user@gmail.com / password<br>
+-                        - admin@javaops.ru / admin</p>
++                        - user@yandex.ru / password<br>
++                        - admin@gmail.com / admin<br>
++                        - guest@gmail.com / guest</p>
+                         """,
+                 contact = @Contact(url = "https://javaops.ru/#contacts", name = "Grigory Kislin", email = "admin@javaops.ru")
+         ),
+Index: src/test/java/ru/javaops/bootjava/web/user/ProfileControllerTest.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/test/java/ru/javaops/bootjava/web/user/ProfileControllerTest.java b/src/test/java/ru/javaops/bootjava/web/user/ProfileControllerTest.java
+--- a/src/test/java/ru/javaops/bootjava/web/user/ProfileControllerTest.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/test/java/ru/javaops/bootjava/web/user/ProfileControllerTest.java	(date 1687552388398)
+@@ -10,7 +10,7 @@
+ import ru.javaops.bootjava.repository.UserRepository;
+ import ru.javaops.bootjava.to.UserTo;
+ import ru.javaops.bootjava.util.JsonUtil;
+-import ru.javaops.bootjava.util.UserUtil;
++import ru.javaops.bootjava.util.UsersUtil;
+ import ru.javaops.bootjava.web.AbstractControllerTest;
+ 
+ import static org.hamcrest.Matchers.containsString;
+@@ -18,13 +18,12 @@
+ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+ import static ru.javaops.bootjava.web.user.ProfileController.REST_URL;
+-import static ru.javaops.bootjava.web.user.UniqueMailValidator.EXCEPTION_DUPLICATE_EMAIL;
+ import static ru.javaops.bootjava.web.user.UserTestData.*;
+ 
+ class ProfileControllerTest extends AbstractControllerTest {
+ 
+     @Autowired
+-    private UserRepository userRepository;
++    private UserRepository repository;
+ 
+     @Test
+     @WithUserDetails(value = USER_MAIL)
+@@ -46,13 +45,13 @@
+     void delete() throws Exception {
+         perform(MockMvcRequestBuilders.delete(REST_URL))
+                 .andExpect(status().isNoContent());
+-        USER_MATCHER.assertMatch(userRepository.findAll(), admin);
++        USER_MATCHER.assertMatch(repository.findAll(), admin, guest);
+     }
+ 
+     @Test
+     void register() throws Exception {
+         UserTo newTo = new UserTo(null, "newName", "newemail@ya.ru", "newPassword");
+-        User newUser = UserUtil.createNewFromTo(newTo);
++        User newUser = UsersUtil.createNewFromTo(newTo);
+         ResultActions action = perform(MockMvcRequestBuilders.post(REST_URL)
+                 .contentType(MediaType.APPLICATION_JSON)
+                 .content(JsonUtil.writeValue(newTo)))
+@@ -63,7 +62,7 @@
+         int newId = created.id();
+         newUser.setId(newId);
+         USER_MATCHER.assertMatch(created, newUser);
+-        USER_MATCHER.assertMatch(userRepository.getById(newId), newUser);
++        USER_MATCHER.assertMatch(repository.getExisted(newId), newUser);
+     }
+ 
+     @Test
+@@ -75,7 +74,7 @@
+                 .andDo(print())
+                 .andExpect(status().isNoContent());
+ 
+-        USER_MATCHER.assertMatch(userRepository.getById(USER_ID), UserUtil.updateFromTo(new User(user), updatedTo));
++        USER_MATCHER.assertMatch(repository.getExisted(USER_ID), UsersUtil.updateFromTo(new User(user), updatedTo));
+     }
+ 
+     @Test
+@@ -107,6 +106,6 @@
+                 .content(JsonUtil.writeValue(updatedTo)))
+                 .andDo(print())
+                 .andExpect(status().isUnprocessableEntity())
+-                .andExpect(content().string(containsString(EXCEPTION_DUPLICATE_EMAIL)));
++                .andExpect(content().string(containsString(UniqueMailValidator.EXCEPTION_DUPLICATE_EMAIL)));
+     }
+ }
+\ No newline at end of file
+Index: pom.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/pom.xml b/pom.xml
+--- a/pom.xml	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/pom.xml	(date 1692638753270)
+@@ -5,19 +5,20 @@
+     <parent>
+         <groupId>org.springframework.boot</groupId>
+         <artifactId>spring-boot-starter-parent</artifactId>
+-        <version>2.6.7</version>
++        <version>3.1.2</version>
+         <relativePath/> <!-- lookup parent from repository -->
+     </parent>
+     <groupId>ru.javaops</groupId>
+     <artifactId>bootjava</artifactId>
+     <version>1.0</version>
+     <name>BootJava</name>
+-    <description>Spring Boot 2.x HATEOAS application (BootJava)</description>
++    <description>Spring Boot 3.x HATEOAS application (BootJava)</description>
+     <url>https://javaops.ru/view/bootjava</url>
+ 
+     <properties>
+         <java.version>17</java.version>
+-        <springdoc.version>1.6.8</springdoc.version>
++        <springdoc.version>2.2.0</springdoc.version>
++        <jsoup.version>1.16.1</jsoup.version>
+         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+     </properties>
+@@ -43,18 +44,13 @@
+         <!--        jackson-->
+         <dependency>
+             <groupId>com.fasterxml.jackson.datatype</groupId>
+-            <artifactId>jackson-datatype-hibernate5</artifactId>
+-        </dependency>
+-
+-        <!--Swagger-->
+-        <dependency>
+-            <groupId>org.springdoc</groupId>
+-            <artifactId>springdoc-openapi-ui</artifactId>
+-            <version>${springdoc.version}</version>
++            <artifactId>jackson-datatype-hibernate5-jakarta</artifactId>
+         </dependency>
++
++        <!--Springdoc / Swagger-->
+         <dependency>
+             <groupId>org.springdoc</groupId>
+-            <artifactId>springdoc-openapi-security</artifactId>
++            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+             <version>${springdoc.version}</version>
+         </dependency>
+ 
+@@ -71,25 +67,23 @@
+         <dependency>
+             <groupId>com.h2database</groupId>
+             <artifactId>h2</artifactId>
++        </dependency>
++        <dependency>
++            <groupId>org.jsoup</groupId>
++            <artifactId>jsoup</artifactId>
++            <version>${jsoup.version}</version>
+         </dependency>
+         <dependency>
+             <groupId>org.projectlombok</groupId>
+             <artifactId>lombok</artifactId>
+             <optional>true</optional>
+         </dependency>
+-        <dependency>
+-            <groupId>org.jsoup</groupId>
+-            <artifactId>jsoup</artifactId>
+-            <version>1.14.3</version>
+-        </dependency>
+ 
+-        <!--    https://github.com/spring-projects/spring-boot/wiki/Spring-Boot-2.4-Release-Notes#junit-5s-vintage-engine-removed-from-spring-boot-starter-test-->
+         <dependency>
+             <groupId>org.springframework.boot</groupId>
+             <artifactId>spring-boot-starter-test</artifactId>
+             <scope>test</scope>
+         </dependency>
+-        <!--        https://www.baeldung.com/spring-security-integration-tests        -->
+         <dependency>
+             <groupId>org.springframework.security</groupId>
+             <artifactId>spring-security-test</artifactId>
+Index: src/test/java/ru/javaops/bootjava/web/user/UserTestData.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/test/java/ru/javaops/bootjava/web/user/UserTestData.java b/src/test/java/ru/javaops/bootjava/web/user/UserTestData.java
+--- a/src/test/java/ru/javaops/bootjava/web/user/UserTestData.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/test/java/ru/javaops/bootjava/web/user/UserTestData.java	(date 1687551772945)
+@@ -13,12 +13,15 @@
+ 
+     public static final int USER_ID = 1;
+     public static final int ADMIN_ID = 2;
++    public static final int GUEST_ID = 3;
+     public static final int NOT_FOUND = 100;
+-    public static final String USER_MAIL = "user@gmail.com";
+-    public static final String ADMIN_MAIL = "admin@javaops.ru";
++    public static final String USER_MAIL = "user@yandex.ru";
++    public static final String ADMIN_MAIL = "admin@gmail.com";
++    public static final String GUEST_MAIL = "guest@gmail.com";
+ 
+     public static final User user = new User(USER_ID, "User", USER_MAIL, "password", Role.USER);
+     public static final User admin = new User(ADMIN_ID, "Admin", ADMIN_MAIL, "admin", Role.ADMIN, Role.USER);
++    public static final User guest = new User(GUEST_ID, "Guest", GUEST_MAIL, "guest");
+ 
+     public static User getNew() {
+         return new User(null, "New", "new@gmail.com", "newPass", false, new Date(), Collections.singleton(Role.USER));
+Index: src/main/java/ru/javaops/bootjava/config/RestExceptionHandler.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/config/RestExceptionHandler.java b/src/main/java/ru/javaops/bootjava/config/RestExceptionHandler.java
+new file mode 100644
+--- /dev/null	(date 1692638409362)
++++ b/src/main/java/ru/javaops/bootjava/config/RestExceptionHandler.java	(date 1692638409362)
+@@ -0,0 +1,128 @@
++package ru.javaops.bootjava.config;
++
++import jakarta.persistence.EntityNotFoundException;
++import jakarta.servlet.http.HttpServletRequest;
++import jakarta.validation.ValidationException;
++import lombok.AllArgsConstructor;
++import lombok.Getter;
++import lombok.extern.slf4j.Slf4j;
++import org.springframework.context.MessageSource;
++import org.springframework.context.i18n.LocaleContextHolder;
++import org.springframework.core.NestedExceptionUtils;
++import org.springframework.dao.DataIntegrityViolationException;
++import org.springframework.http.ProblemDetail;
++import org.springframework.lang.NonNull;
++import org.springframework.security.core.AuthenticationException;
++import org.springframework.security.web.firewall.RequestRejectedException;
++import org.springframework.validation.BindException;
++import org.springframework.validation.BindingResult;
++import org.springframework.validation.FieldError;
++import org.springframework.validation.ObjectError;
++import org.springframework.web.ErrorResponse;
++import org.springframework.web.HttpRequestMethodNotSupportedException;
++import org.springframework.web.bind.MissingServletRequestParameterException;
++import org.springframework.web.bind.annotation.ExceptionHandler;
++import org.springframework.web.bind.annotation.RestControllerAdvice;
++import org.springframework.web.servlet.NoHandlerFoundException;
++import ru.javaops.bootjava.error.*;
++
++import java.io.FileNotFoundException;
++import java.nio.file.AccessDeniedException;
++import java.util.LinkedHashMap;
++import java.util.Map;
++import java.util.Optional;
++
++import static ru.javaops.bootjava.error.ErrorType.*;
++
++@RestControllerAdvice
++@AllArgsConstructor
++@Slf4j
++public class RestExceptionHandler {
++    public static final String ERR_PFX = "ERR# ";
++
++    @Getter
++    private final MessageSource messageSource;
++
++    //    https://stackoverflow.com/a/52254601/548473
++    static final Map<Class<? extends Throwable>, ErrorType> HTTP_STATUS_MAP = new LinkedHashMap<>() {
++        {
++// more specific first
++            put(NotFoundException.class, NOT_FOUND);
++            put(FileNotFoundException.class, NOT_FOUND);
++            put(NoHandlerFoundException.class, NOT_FOUND);
++            put(DataConflictException.class, DATA_CONFLICT);
++            put(IllegalRequestDataException.class, BAD_REQUEST);
++            put(AppException.class, APP_ERROR);
++            put(UnsupportedOperationException.class, APP_ERROR);
++            put(EntityNotFoundException.class, DATA_CONFLICT);
++            put(DataIntegrityViolationException.class, DATA_CONFLICT);
++            put(IllegalArgumentException.class, BAD_DATA);
++            put(BindException.class, BAD_REQUEST);
++            put(ValidationException.class, BAD_REQUEST);
++            put(HttpRequestMethodNotSupportedException.class, BAD_REQUEST);
++            put(MissingServletRequestParameterException.class, BAD_REQUEST);
++            put(RequestRejectedException.class, BAD_REQUEST);
++            put(AccessDeniedException.class, FORBIDDEN);
++            put(AuthenticationException.class, UNAUTHORIZED);
++        }
++    };
++
++    @ExceptionHandler(BindException.class)
++    ProblemDetail bindException(BindException ex, HttpServletRequest request) {
++        return processException(ex, request, Map.of("invalid_params", getErrorMap(ex.getBindingResult())));
++    }
++
++    //   https://howtodoinjava.com/spring-mvc/spring-problemdetail-errorresponse/#5-adding-problemdetail-to-custom-exceptions
++    @ExceptionHandler(Exception.class)
++    ProblemDetail exception(Exception ex, HttpServletRequest request) {
++        return processException(ex, request, Map.of());
++    }
++
++    ProblemDetail processException(@NonNull Exception ex, HttpServletRequest request, Map<String, Object> additionalParams) {
++        String path = request.getRequestURI();
++        Class<? extends Exception> exClass = ex.getClass();
++        Optional<ErrorType> optType = HTTP_STATUS_MAP.entrySet().stream()
++                .filter(
++                        entry -> entry.getKey().isAssignableFrom(exClass)
++                )
++                .findAny().map(Map.Entry::getValue);
++        if (optType.isPresent()) {
++            log.error(ERR_PFX + "Exception {} at request {}", ex, path);
++            return createProblemDetail(ex, optType.get(), ex.getMessage(), additionalParams);
++        } else {
++            Throwable root = getRootCause(ex);
++            log.error(ERR_PFX + "Exception " + root + " at request " + path, root);
++            return createProblemDetail(ex, APP_ERROR, "Exception " + root.getClass().getSimpleName(), additionalParams);
++        }
++    }
++
++    private ProblemDetail createProblemDetail(Exception ex, ErrorType type, String defaultDetail, @NonNull Map<String, Object> additionalParams) {
++        ErrorResponse.Builder builder = ErrorResponse.builder(ex, type.status, defaultDetail);
++        ProblemDetail pd = builder.build().updateAndGetBody(messageSource, LocaleContextHolder.getLocale());
++        additionalParams.forEach(pd::setProperty);
++        return pd;
++    }
++
++    private Map<String, String> getErrorMap(BindingResult result) {
++        Map<String, String> invalidParams = new LinkedHashMap<>();
++        for (ObjectError error : result.getGlobalErrors()) {
++            invalidParams.put(error.getObjectName(), getErrorMessage(error));
++        }
++        for (FieldError error : result.getFieldErrors()) {
++            invalidParams.put(error.getField(), getErrorMessage(error));
++        }
++        log.warn("BindingException: {}", invalidParams);
++        return invalidParams;
++    }
++
++    private String getErrorMessage(ObjectError error) {
++        return messageSource.getMessage(error.getCode(), error.getArguments(), error.getDefaultMessage(), LocaleContextHolder.getLocale());
++    }
++
++    //  https://stackoverflow.com/a/65442410/548473
++    @NonNull
++    private static Throwable getRootCause(@NonNull Throwable t) {
++        Throwable rootCause = NestedExceptionUtils.getRootCause(t);
++        return rootCause != null ? rootCause : t;
++    }
++}
+Index: src/main/java/ru/javaops/bootjava/config/AppConfig.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/config/AppConfig.java b/src/main/java/ru/javaops/bootjava/config/AppConfig.java
+--- a/src/main/java/ru/javaops/bootjava/config/AppConfig.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/java/ru/javaops/bootjava/config/AppConfig.java	(date 1687551773014)
+@@ -1,20 +1,28 @@
+ package ru.javaops.bootjava.config;
+ 
+-import com.fasterxml.jackson.databind.Module;
+-import com.fasterxml.jackson.datatype.hibernate5.Hibernate5Module;
++import com.fasterxml.jackson.annotation.JsonAnyGetter;
++import com.fasterxml.jackson.annotation.JsonAutoDetect;
++import com.fasterxml.jackson.databind.ObjectMapper;
++import com.fasterxml.jackson.datatype.hibernate5.jakarta.Hibernate5JakartaModule;
+ import lombok.extern.slf4j.Slf4j;
+ import org.h2.tools.Server;
++import org.springframework.beans.factory.annotation.Autowired;
+ import org.springframework.cache.annotation.EnableCaching;
+ import org.springframework.context.annotation.Bean;
+ import org.springframework.context.annotation.Configuration;
+ import org.springframework.context.annotation.Profile;
++import org.springframework.http.ProblemDetail;
++import ru.javaops.bootjava.util.JsonUtil;
+ 
+ import java.sql.SQLException;
++import java.util.Map;
++
++import static com.fasterxml.jackson.annotation.JsonAutoDetect.Visibility.ANY;
++import static com.fasterxml.jackson.annotation.JsonAutoDetect.Visibility.NONE;
+ 
+ @Configuration
+ @Slf4j
+ @EnableCaching
+-// TODO: cache only most requested data!
+ public class AppConfig {
+ 
+     @Profile("!test")
+@@ -24,9 +32,18 @@
+         return Server.createTcpServer("-tcp", "-tcpAllowOthers", "-tcpPort", "9092");
+     }
+ 
+-    //    https://stackoverflow.com/a/46947975/548473
+-    @Bean
+-    Module module() {
+-        return new Hibernate5Module();
++    //   https://stackoverflow.com/a/74630129/548473
++    @JsonAutoDetect(fieldVisibility = NONE, getterVisibility = ANY)
++    interface MixIn {
++        @JsonAnyGetter
++        Map<String, Object> getProperties();
++    }
++
++    @Autowired
++    void configureAndStoreObjectMapper(ObjectMapper objectMapper) {
++        objectMapper.registerModule(new Hibernate5JakartaModule());
++        // ErrorHandling: https://stackoverflow.com/questions/7421474/548473
++        objectMapper.addMixIn(ProblemDetail.class, MixIn.class);
++        JsonUtil.setMapper(objectMapper);
+     }
+ }
+Index: src/main/java/ru/javaops/bootjava/config/SecurityConfig.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/config/SecurityConfig.java b/src/main/java/ru/javaops/bootjava/config/SecurityConfig.java
+new file mode 100644
+--- /dev/null	(date 1692639414588)
++++ b/src/main/java/ru/javaops/bootjava/config/SecurityConfig.java	(date 1692639414588)
+@@ -0,0 +1,71 @@
++package ru.javaops.bootjava.config;
++
++import lombok.AllArgsConstructor;
++import lombok.extern.slf4j.Slf4j;
++import org.springframework.context.annotation.Bean;
++import org.springframework.context.annotation.Configuration;
++import org.springframework.http.HttpMethod;
++import org.springframework.security.config.Customizer;
++import org.springframework.security.config.annotation.web.builders.HttpSecurity;
++import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
++import org.springframework.security.config.annotation.web.configuration.WebSecurityCustomizer;
++import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
++import org.springframework.security.config.http.SessionCreationPolicy;
++import org.springframework.security.core.userdetails.UserDetailsService;
++import org.springframework.security.core.userdetails.UsernameNotFoundException;
++import org.springframework.security.crypto.factory.PasswordEncoderFactories;
++import org.springframework.security.crypto.password.PasswordEncoder;
++import org.springframework.security.web.SecurityFilterChain;
++import ru.javaops.bootjava.model.Role;
++import ru.javaops.bootjava.model.User;
++import ru.javaops.bootjava.repository.UserRepository;
++import ru.javaops.bootjava.web.AuthUser;
++
++import java.util.Optional;
++
++@Configuration
++@EnableWebSecurity
++@Slf4j
++@AllArgsConstructor
++public class SecurityConfig {
++    public static final PasswordEncoder PASSWORD_ENCODER = PasswordEncoderFactories.createDelegatingPasswordEncoder();
++
++    private final UserRepository userRepository;
++    private final RestAuthenticationEntryPoint authenticationEntryPoint;
++
++    @Bean
++    PasswordEncoder passwordEncoder() {
++        return PASSWORD_ENCODER;
++    }
++
++    @Bean
++    UserDetailsService userDetailsService() {
++        return email -> {
++            log.debug("Authenticating '{}'", email);
++            Optional<User> optionalUser = userRepository.findByEmailIgnoreCase(email);
++            return new AuthUser(optionalUser.orElseThrow(
++                    () -> new UsernameNotFoundException("User '" + email + "' was not found")));
++        };
++    }
++
++    //  https://spring.io/blog/2022/02/21/spring-security-without-the-websecurityconfigureradapter#configuring-websecurity
++    //  https://stackoverflow.com/a/61147599/548473
++    @Bean
++    WebSecurityCustomizer webSecurityCustomizer() {
++        return web -> web.ignoring().requestMatchers("/", "/v3/api-docs/**", "/swagger-ui.html", "/swagger-ui/**");
++    }
++
++    //https://stackoverflow.com/a/76538979/548473
++    @Bean
++    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
++        http.securityMatcher("/api/**").authorizeHttpRequests(authz -> authz
++                        .requestMatchers("/api/admin/**").hasRole(Role.ADMIN.name())
++                        .requestMatchers(HttpMethod.POST, "/api/profile").anonymous()
++                        .requestMatchers("/api/**").authenticated()
++                ).httpBasic(Customizer.withDefaults())
++                .sessionManagement(smc -> smc
++                        .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
++                ).csrf(AbstractHttpConfigurer::disable);
++        return http.build();
++    }
++}
+\ No newline at end of file

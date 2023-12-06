@@ -1,0 +1,476 @@
+Index: src/main/java/ru/javaops/bootjava/config/WebSecurityConfig.java
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/config/WebSecurityConfig.java b/src/main/java/ru/javaops/bootjava/config/WebSecurityConfig.java
+deleted file mode 100644
+--- a/src/main/java/ru/javaops/bootjava/config/WebSecurityConfig.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ /dev/null	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
+@@ -1,68 +0,0 @@
+-package ru.javaops.bootjava.config;
+-
+-import com.fasterxml.jackson.databind.ObjectMapper;
+-import lombok.AllArgsConstructor;
+-import lombok.extern.slf4j.Slf4j;
+-import org.springframework.beans.factory.annotation.Autowired;
+-import org.springframework.context.annotation.Bean;
+-import org.springframework.context.annotation.Configuration;
+-import org.springframework.http.HttpMethod;
+-import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
+-import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+-import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+-import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter;
+-import org.springframework.security.config.http.SessionCreationPolicy;
+-import org.springframework.security.core.userdetails.UserDetailsService;
+-import org.springframework.security.core.userdetails.UsernameNotFoundException;
+-import ru.javaops.bootjava.model.Role;
+-import ru.javaops.bootjava.model.User;
+-import ru.javaops.bootjava.repository.UserRepository;
+-import ru.javaops.bootjava.util.JsonUtil;
+-import ru.javaops.bootjava.web.AuthUser;
+-
+-import java.util.Optional;
+-
+-import static ru.javaops.bootjava.util.UserUtil.PASSWORD_ENCODER;
+-
+-@Configuration
+-@EnableWebSecurity
+-@Slf4j
+-@AllArgsConstructor
+-public class WebSecurityConfig extends WebSecurityConfigurerAdapter {
+-
+-    private final UserRepository userRepository;
+-
+-    @Autowired
+-    private void setMapper(ObjectMapper objectMapper) {
+-        JsonUtil.setMapper(objectMapper);
+-    }
+-
+-    @Bean
+-    @Override
+-    public UserDetailsService userDetailsServiceBean() throws Exception {
+-        return super.userDetailsServiceBean();
+-    }
+-
+-    @Autowired
+-    public void configureGlobal(AuthenticationManagerBuilder auth) throws Exception {
+-        auth.userDetailsService(
+-                        email -> {
+-                            log.debug("Authenticating '{}'", email);
+-                            Optional<User> optionalUser = userRepository.findByEmailIgnoreCase(email);
+-                            return new AuthUser(optionalUser.orElseThrow(
+-                                    () -> new UsernameNotFoundException("User '" + email + "' was not found")));
+-                        })
+-                .passwordEncoder(PASSWORD_ENCODER);
+-    }
+-
+-    @Override
+-    protected void configure(HttpSecurity http) throws Exception {
+-        http.authorizeRequests()
+-                .antMatchers("/api/admin/**").hasRole(Role.ADMIN.name())
+-                .antMatchers(HttpMethod.POST, "/api/profile").anonymous()
+-                .antMatchers("/api/**").authenticated()
+-                .and().httpBasic()
+-                .and().sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+-                .and().csrf().disable();
+-    }
+-}
+\ No newline at end of file
+Index: src/main/java/ru/javaops/bootjava/util/validation/ValidationUtil.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/util/validation/ValidationUtil.java b/src/main/java/ru/javaops/bootjava/util/validation/ValidationUtil.java
+--- a/src/main/java/ru/javaops/bootjava/util/validation/ValidationUtil.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/java/ru/javaops/bootjava/util/validation/ValidationUtil.java	(date 1661020431738)
+@@ -29,6 +29,12 @@
+             throw new IllegalRequestDataException("Entity with id=" + id + " not found");
+         }
+     }
++    public static <T> T checkExisted(T obj, int id) {
++        if (obj == null) {
++            throw new IllegalRequestDataException("Entity with id=" + id + " not found");
++        }
++        return obj;
++    }
+ 
+     //  https://stackoverflow.com/a/65442410/548473
+     @NonNull
+Index: src/main/java/ru/javaops/bootjava/config/AppConfig.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/config/AppConfig.java b/src/main/java/ru/javaops/bootjava/config/AppConfig.java
+--- a/src/main/java/ru/javaops/bootjava/config/AppConfig.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/java/ru/javaops/bootjava/config/AppConfig.java	(date 1661106448039)
+@@ -1,13 +1,15 @@
+ package ru.javaops.bootjava.config;
+ 
+-import com.fasterxml.jackson.databind.Module;
++import com.fasterxml.jackson.databind.ObjectMapper;
+ import com.fasterxml.jackson.datatype.hibernate5.Hibernate5Module;
+ import lombok.extern.slf4j.Slf4j;
+ import org.h2.tools.Server;
++import org.springframework.beans.factory.annotation.Autowired;
+ import org.springframework.cache.annotation.EnableCaching;
+ import org.springframework.context.annotation.Bean;
+ import org.springframework.context.annotation.Configuration;
+ import org.springframework.context.annotation.Profile;
++import ru.javaops.bootjava.util.JsonUtil;
+ 
+ import java.sql.SQLException;
+ 
+@@ -24,9 +26,9 @@
+         return Server.createTcpServer("-tcp", "-tcpAllowOthers", "-tcpPort", "9092");
+     }
+ 
+-    //    https://stackoverflow.com/a/46947975/548473
+-    @Bean
+-    Module module() {
+-        return new Hibernate5Module();
++    @Autowired
++    void configureAndStoreObjectMapper(ObjectMapper objectMapper) {
++        objectMapper.registerModule(new Hibernate5Module());
++        JsonUtil.setMapper(objectMapper);
+     }
+ }
+Index: src/main/java/ru/javaops/bootjava/config/SecurityConfiguration.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/config/SecurityConfiguration.java b/src/main/java/ru/javaops/bootjava/config/SecurityConfiguration.java
+new file mode 100644
+--- /dev/null	(date 1654281846315)
++++ b/src/main/java/ru/javaops/bootjava/config/SecurityConfiguration.java	(date 1654281846315)
+@@ -0,0 +1,59 @@
++package ru.javaops.bootjava.config;
++
++import lombok.AllArgsConstructor;
++import lombok.extern.slf4j.Slf4j;
++import org.springframework.context.annotation.Bean;
++import org.springframework.context.annotation.Configuration;
++import org.springframework.http.HttpMethod;
++import org.springframework.security.config.annotation.web.builders.HttpSecurity;
++import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
++import org.springframework.security.config.http.SessionCreationPolicy;
++import org.springframework.security.core.userdetails.UserDetailsService;
++import org.springframework.security.core.userdetails.UsernameNotFoundException;
++import org.springframework.security.crypto.factory.PasswordEncoderFactories;
++import org.springframework.security.crypto.password.PasswordEncoder;
++import org.springframework.security.web.SecurityFilterChain;
++import ru.javaops.bootjava.model.Role;
++import ru.javaops.bootjava.model.User;
++import ru.javaops.bootjava.repository.UserRepository;
++import ru.javaops.bootjava.web.AuthUser;
++
++import java.util.Optional;
++
++@Configuration
++@EnableWebSecurity
++@Slf4j
++@AllArgsConstructor
++public class SecurityConfiguration {
++
++    public static final PasswordEncoder PASSWORD_ENCODER = PasswordEncoderFactories.createDelegatingPasswordEncoder();
++
++    private final UserRepository userRepository;
++
++    @Bean
++    public PasswordEncoder passwordEncoder() {
++        return PASSWORD_ENCODER;
++    }
++
++    @Bean
++    public UserDetailsService userDetailsService() {
++        return email -> {
++            log.debug("Authenticating '{}'", email);
++            Optional<User> optionalUser = userRepository.findByEmailIgnoreCase(email);
++            return new AuthUser(optionalUser.orElseThrow(
++                    () -> new UsernameNotFoundException("User '" + email + "' was not found")));
++        };
++    }
++
++    @Bean
++    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
++        http.authorizeRequests()
++                .antMatchers("/api/admin/**").hasRole(Role.ADMIN.name())
++                .antMatchers(HttpMethod.POST, "/api/profile").anonymous()
++                .antMatchers("/api/**").authenticated()
++                .and().httpBasic()
++                .and().sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS)
++                .and().csrf().disable();
++        return http.build();
++    }
++}
+\ No newline at end of file
+Index: src/test/java/ru/javaops/bootjava/web/user/AdminUserControllerTest.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/test/java/ru/javaops/bootjava/web/user/AdminUserControllerTest.java b/src/test/java/ru/javaops/bootjava/web/user/AdminUserControllerTest.java
+--- a/src/test/java/ru/javaops/bootjava/web/user/AdminUserControllerTest.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/test/java/ru/javaops/bootjava/web/user/AdminUserControllerTest.java	(date 1661020631537)
+@@ -107,7 +107,7 @@
+                 .andDo(print())
+                 .andExpect(status().isNoContent());
+ 
+-        USER_MATCHER.assertMatch(userRepository.getById(USER_ID), getUpdated());
++        USER_MATCHER.assertMatch(userRepository.getExisted(USER_ID), getUpdated());
+     }
+ 
+     @Test
+@@ -123,7 +123,7 @@
+         int newId = created.id();
+         newUser.setId(newId);
+         USER_MATCHER.assertMatch(created, newUser);
+-        USER_MATCHER.assertMatch(userRepository.getById(newId), newUser);
++        USER_MATCHER.assertMatch(userRepository.getExisted(newId), newUser);
+     }
+ 
+     @Test
+@@ -144,7 +144,7 @@
+                 .andDo(print())
+                 .andExpect(status().isNoContent());
+ 
+-        assertFalse(userRepository.getById(USER_ID).isEnabled());
++        assertFalse(userRepository.getExisted(USER_ID).isEnabled());
+     }
+ 
+     @Test
+Index: src/test/java/ru/javaops/bootjava/web/user/ProfileControllerTest.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/test/java/ru/javaops/bootjava/web/user/ProfileControllerTest.java b/src/test/java/ru/javaops/bootjava/web/user/ProfileControllerTest.java
+--- a/src/test/java/ru/javaops/bootjava/web/user/ProfileControllerTest.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/test/java/ru/javaops/bootjava/web/user/ProfileControllerTest.java	(date 1661020631544)
+@@ -63,7 +63,7 @@
+         int newId = created.id();
+         newUser.setId(newId);
+         USER_MATCHER.assertMatch(created, newUser);
+-        USER_MATCHER.assertMatch(userRepository.getById(newId), newUser);
++        USER_MATCHER.assertMatch(userRepository.getExisted(newId), newUser);
+     }
+ 
+     @Test
+@@ -75,7 +75,7 @@
+                 .andDo(print())
+                 .andExpect(status().isNoContent());
+ 
+-        USER_MATCHER.assertMatch(userRepository.getById(USER_ID), UserUtil.updateFromTo(new User(user), updatedTo));
++        USER_MATCHER.assertMatch(userRepository.getExisted(USER_ID), UserUtil.updateFromTo(new User(user), updatedTo));
+     }
+ 
+     @Test
+Index: pom.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/pom.xml b/pom.xml
+--- a/pom.xml	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/pom.xml	(date 1661020020891)
+@@ -5,7 +5,7 @@
+     <parent>
+         <groupId>org.springframework.boot</groupId>
+         <artifactId>spring-boot-starter-parent</artifactId>
+-        <version>2.6.7</version>
++        <version>2.7.2</version>
+         <relativePath/> <!-- lookup parent from repository -->
+     </parent>
+     <groupId>ru.javaops</groupId>
+@@ -17,7 +17,7 @@
+ 
+     <properties>
+         <java.version>17</java.version>
+-        <springdoc.version>1.6.8</springdoc.version>
++        <springdoc.version>1.6.9</springdoc.version>
+         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+     </properties>
+@@ -80,7 +80,7 @@
+         <dependency>
+             <groupId>org.jsoup</groupId>
+             <artifactId>jsoup</artifactId>
+-            <version>1.14.3</version>
++            <version>1.15.1</version>
+         </dependency>
+ 
+         <!--    https://github.com/spring-projects/spring-boot/wiki/Spring-Boot-2.4-Release-Notes#junit-5s-vintage-engine-removed-from-spring-boot-starter-test-->
+Index: src/main/java/ru/javaops/bootjava/util/UserUtil.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/util/UserUtil.java b/src/main/java/ru/javaops/bootjava/util/UserUtil.java
+--- a/src/main/java/ru/javaops/bootjava/util/UserUtil.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/java/ru/javaops/bootjava/util/UserUtil.java	(date 1654281794703)
+@@ -1,17 +1,15 @@
+ package ru.javaops.bootjava.util;
+ 
+ import lombok.experimental.UtilityClass;
+-import org.springframework.security.crypto.factory.PasswordEncoderFactories;
+-import org.springframework.security.crypto.password.PasswordEncoder;
+ import ru.javaops.bootjava.model.Role;
+ import ru.javaops.bootjava.model.User;
+ import ru.javaops.bootjava.to.UserTo;
+ 
++import static ru.javaops.bootjava.config.SecurityConfiguration.PASSWORD_ENCODER;
++
+ @UtilityClass
+ public class UserUtil {
+ 
+-    public static final PasswordEncoder PASSWORD_ENCODER = PasswordEncoderFactories.createDelegatingPasswordEncoder();
+-
+     public static User createNewFromTo(UserTo userTo) {
+         return new User(null, userTo.getName(), userTo.getEmail().toLowerCase(), userTo.getPassword(), Role.USER);
+     }
+Index: src/main/java/ru/javaops/bootjava/config/WebConfig.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/config/WebConfig.java b/src/main/java/ru/javaops/bootjava/config/WebConfig.java
+new file mode 100644
+--- /dev/null	(date 1661020801279)
++++ b/src/main/java/ru/javaops/bootjava/config/WebConfig.java	(date 1661020801279)
+@@ -0,0 +1,14 @@
++package ru.javaops.bootjava.config;
++
++import org.springframework.context.annotation.Configuration;
++import org.springframework.web.servlet.config.annotation.ViewControllerRegistry;
++import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
++
++@Configuration
++public class WebConfig implements WebMvcConfigurer {
++
++    @Override
++    public void addViewControllers(ViewControllerRegistry registry) {
++        registry.addRedirectViewController("/", "/swagger-ui/index.html");
++    }
++}
+Index: src/main/java/ru/javaops/bootjava/model/User.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/model/User.java b/src/main/java/ru/javaops/bootjava/model/User.java
+--- a/src/main/java/ru/javaops/bootjava/model/User.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/java/ru/javaops/bootjava/model/User.java	(date 1661085646793)
+@@ -18,10 +18,7 @@
+ import javax.validation.constraints.Size;
+ import java.io.Serial;
+ import java.io.Serializable;
+-import java.util.Collection;
+-import java.util.Date;
+-import java.util.EnumSet;
+-import java.util.Set;
++import java.util.*;
+ 
+ @Entity
+ @Table(name = "users")
+@@ -57,10 +54,10 @@
+     @Enumerated(EnumType.STRING)
+     @CollectionTable(name = "user_role",
+             joinColumns = @JoinColumn(name = "user_id"),
+-            uniqueConstraints = @UniqueConstraint(columnNames = {"user_id", "role"}, name = "uk_user_roles"))
++            uniqueConstraints = @UniqueConstraint(columnNames = {"user_id", "role"}, name = "uk_user_role"))
+     @Column(name = "role")
+     @ElementCollection(fetch = FetchType.EAGER)
+-    @JoinColumn(name = "user_id") //https://stackoverflow.com/a/62848296/548473
++    @JoinColumn
+     @OnDelete(action = OnDeleteAction.CASCADE)
+     private Set<Role> roles;
+ 
+@@ -68,8 +65,8 @@
+         this(u.id, u.name, u.email, u.password, u.enabled, u.registered, u.roles);
+     }
+ 
+-    public User(Integer id, String name, String email, String password, Role role, Role... roles) {
+-        this(id, name, email, password, true, new Date(), EnumSet.of(role, roles));
++    public User(Integer id, String name, String email, String password, Role... roles) {
++        this(id, name, email, password, true, new Date(), Arrays.asList(roles));
+     }
+ 
+     public User(Integer id, String name, String email, String password, boolean enabled, Date registered, Collection<Role> roles) {
+Index: src/main/java/ru/javaops/bootjava/model/BaseEntity.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/model/BaseEntity.java b/src/main/java/ru/javaops/bootjava/model/BaseEntity.java
+--- a/src/main/java/ru/javaops/bootjava/model/BaseEntity.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/java/ru/javaops/bootjava/model/BaseEntity.java	(date 1661106448044)
+@@ -1,6 +1,5 @@
+ package ru.javaops.bootjava.model;
+ 
+-import com.fasterxml.jackson.annotation.JsonIgnore;
+ import io.swagger.v3.oas.annotations.media.Schema;
+ import lombok.*;
+ import org.springframework.data.domain.Persistable;
+@@ -30,7 +29,7 @@
+         return id;
+     }
+ 
+-    @JsonIgnore
++    @Schema(hidden = true)
+     @Override
+     public boolean isNew() {
+         return id == null;
+Index: src/main/java/ru/javaops/bootjava/web/user/AdminUserController.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/web/user/AdminUserController.java b/src/main/java/ru/javaops/bootjava/web/user/AdminUserController.java
+--- a/src/main/java/ru/javaops/bootjava/web/user/AdminUserController.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/java/ru/javaops/bootjava/web/user/AdminUserController.java	(date 1661020593836)
+@@ -73,7 +73,7 @@
+     @Transactional
+     public void enable(@PathVariable int id, @RequestParam boolean enabled) {
+         log.info(enabled ? "enable {}" : "disable {}", id);
+-        User user = repository.getById(id);
++        User user = repository.getExisted(id);
+         user.setEnabled(enabled);
+     }
+ }
+\ No newline at end of file
+Index: src/main/java/ru/javaops/bootjava/repository/BaseRepository.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/ru/javaops/bootjava/repository/BaseRepository.java b/src/main/java/ru/javaops/bootjava/repository/BaseRepository.java
+--- a/src/main/java/ru/javaops/bootjava/repository/BaseRepository.java	(revision 3ee347827c8f1d278696d24195977caeeff0503e)
++++ b/src/main/java/ru/javaops/bootjava/repository/BaseRepository.java	(date 1661020593831)
+@@ -6,6 +6,7 @@
+ import org.springframework.data.repository.NoRepositoryBean;
+ import org.springframework.transaction.annotation.Transactional;
+ 
++import static ru.javaops.bootjava.util.validation.ValidationUtil.checkExisted;
+ import static ru.javaops.bootjava.util.validation.ValidationUtil.checkModification;
+ 
+ // https://stackoverflow.com/questions/42781264/multiple-base-repositories-in-spring-data-jpa
+@@ -15,10 +16,17 @@
+     //    https://docs.spring.io/spring-data/jpa/docs/current/reference/html/#jpa.query.spel-expressions
+     @Transactional
+     @Modifying
+-    @Query("DELETE FROM #{#entityName} u WHERE u.id=:id")
++    @Query("DELETE FROM #{#entityName} e WHERE e.id=:id")
+     int delete(int id);
+ 
+     default void deleteExisted(int id) {
+         checkModification(delete(id), id);
+     }
++
++    @Query("SELECT e FROM #{#entityName} e WHERE e.id = :id")
++    T get(int id);
++
++    default T getExisted(int id) {
++        return checkExisted(get(id), id);
++    }
+ }
+\ No newline at end of file
